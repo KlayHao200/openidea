@@ -282,6 +282,16 @@ pub fn set_settings(
             }
         });
     }
+    // Directory Mappings (`vcs.unregisteredRoots`) changes which folders are VCS roots:
+    // rescan them so the VCS views and the project tree follow without reopening.
+    if key == "vcs.unregisteredRoots" {
+        let affected = affected();
+        host.runtime.spawn_blocking(move || {
+            for project in affected {
+                project.refresh_repositories();
+            }
+        });
+    }
     let roots_changed = current.as_ref().filter(|_| roots_changed && project_scope).map(|p| p.root.clone().into());
     Ok(SettingsApplied { settings: host.with_proxy_password(settings), project_scope, roots_changed })
 }

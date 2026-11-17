@@ -17,14 +17,18 @@ const SKIPPED: &[&str] = &["node_modules", "target", "build", "dist", "out", "ve
 pub struct Repos {
     repos: Vec<Arc<Repo>>,
     primary: Option<usize>,
+    /// Folders the user unregistered (Directory Mappings › `<none>`): no repository is
+    /// theirs, and no change inside them is reported.
+    hidden: Vec<PathBuf>,
 }
 
 impl Repos {
-    /// Discovers repositories in independent project folders of a workspace.
-    pub fn discover_roots(roots: &[PathBuf], skip: &dyn Fn(&Path) -> bool) -> IdeResult<Self> {
+    /// Discovers repositories in independent project folders of a workspace. `hidden`
+    /// are the folders whose repositories the user unregistered (Directory Mappings).
+    pub fn discover_roots(roots: &[PathBuf], skip: &dyn Fn(&Path) -> bool, hidden: &[PathBuf]) -> IdeResult<Self> {
         let mut repos = Vec::new();
         for root in roots {
-            for repo in Self::discover(root, skip)?.repos {
+            for repo in Self::discover(root, skip, hidden)?.repos {
                 if !repos.iter().any(|r: &Arc<Repo>| r.root() == repo.root()) {
                     repos.push(repo);
                 }
@@ -32,17 +36,18 @@ impl Repos {
         }
         repos.sort_by(|a, b| a.root().cmp(b.root()));
         let primary = (!repos.is_empty()).then_some(0);
-        Ok(Self { repos, primary })
+        Ok(Self { repos, primary, hidden: hidden.to_vec() })
     }
 
     /// The repository containing `project_root` and every repository whose worktree
     /// root lies below it (up to [`MAX_DEPTH`] levels; hidden and dependency folders and
-    /// folders `skip` rejects are not searched).
-    pub fn discover(project_root: &Path, skip: &dyn Fn(&Path) -> bool) -> IdeResult<Self> {
+    /// folders `skip` rejects are not searched). Folders in `hidden` are not searched too.
+    pub fn discover(project_root: &Path, skip: &dyn Fn(&Path) -> bool, hidden: &[PathBuf]) -> IdeResult<Self> {
         let mut repos: Vec<Repo> = Vec::new();
         if let Some(r) = Repo::discover(project_root)? {
             repos.push(r);
         }
+        repos.retain(|r| !hidden.iter().any(|h| *h == r.root()));
         let mut stack: Vec<(PathBuf, usize)> = vec![(project_root.to_path_buf(), 0)];
         while let Some((dir, depth)) = stack.pop() {
             let Ok(entries) = std::fs::read_dir(&dir) else { continue };
@@ -53,7 +58,7 @@ impl Repos {
                 let name = entry.file_name();
                 let name = name.to_string_lossy();
                 let path = entry.path();
-                if name.starts_with('.') || SKIPPED.contains(&name.as_ref()) || skip(&path) {
+                if name.starts_with('.') || SKIPPED.contains(&name.as_ref()) || skip(&path) || hidden.contains(&path) {
                     continue;
                 }
                 if path.join(".git").exists()
@@ -68,12 +73,12 @@ impl Repos {
                 }
             }
         }
-        Ok(Self::new(repos, project_root))
+        Ok(Self::new(repos, project_root, hidden))
     }
 
     /// Only the repository containing `project_root` (the quick lookup on project open).
     pub fn enclosing(project_root: &Path) -> IdeResult<Self> {
-        Ok(Self::new(Repo::discover(project_root)?.into_iter().collect(), project_root))
+        Ok(Self::new(Repo::discover(project_root)?.into_iter().collect(), project_root, &[]))
     }
 
     /// Worktree roots, sorted.
@@ -81,12 +86,31 @@ impl Repos {
         self.repos.iter().map(|r| r.root().to_path_buf()).collect()
     }
 
-    fn new(mut repos: Vec<Repo>, project_root: &Path) -> Self {
+    /// The folders whose repositories the user unregistered (Directory Mappings).
+    pub fn hidden(&self) -> &[PathBuf] {
+        &self.hidden
+    }
+
+    /// Whether `path` lies in an unregistered folder: no repository owns it and its changes
+    /// are not reported, as if the folder were not version-controlled at all. A repository
+    /// registered below such a folder (say the project root unregistered) keeps its files.
+    fn is_hidden(&self, path: &Path) -> bool {
+        self.hidden.iter().any(|h| (path == h || path.starts_with(h)) && !self.has_registered_below(h, path))
+    }
+
+    /// Whether a registered repository contains `path` and lies below the unregistered `h`.
+    fn has_registered_below(&self, h: &Path, path: &Path) -> bool {
+        self.repos
+            .iter()
+            .any(|r| r.root() != h && r.root().starts_with(h) && (path == r.root() || path.starts_with(r.root())))
+    }
+
+    fn new(mut repos: Vec<Repo>, project_root: &Path, hidden: &[PathBuf]) -> Self {
         repos.sort_by(|a, b| a.root().cmp(b.root()));
         let repos: Vec<Arc<Repo>> = repos.into_iter().map(Arc::new).collect();
         let roots: Vec<&Path> = repos.iter().map(|r| r.root()).collect();
         let primary = innermost(&roots, project_root, false).or((!repos.is_empty()).then_some(0));
-        Self { repos, primary }
+        Self { repos, primary, hidden: hidden.to_vec() }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -106,6 +130,9 @@ impl Repos {
     /// root is an entry of the enclosing repository (a submodule or untracked folder there), so
     /// it belongs to that one; to the repository itself only when nothing encloses it.
     pub fn for_path(&self, path: &Path) -> Option<&Arc<Repo>> {
+        if self.is_hidden(path) {
+            return None;
+        }
         let roots: Vec<&Path> = self.repos.iter().map(|r| r.root()).collect();
         let found = innermost(&roots, path, true).or_else(|| {
             // Another spelling of the same location (symlinks, /var vs /private/var).
@@ -120,6 +147,9 @@ impl Repos {
     /// The repository whose worktree root is `root` (the repository a repository-scoped
     /// command was given).
     pub fn at_root(&self, root: &Path) -> Option<&Arc<Repo>> {
+        if self.is_hidden(root) {
+            return None;
+        }
         self.repos.iter().find(|r| r.root() == root).or_else(|| {
             let canon = dunce::canonicalize(root).ok()?;
             self.repos.iter().find(|r| dunce::canonicalize(r.root()).is_ok_and(|r| r == canon))
@@ -185,6 +215,9 @@ impl Repos {
                 }
             };
             out.extend(status.into_iter().filter(|f| {
+                if self.is_hidden(&f.path.0) {
+                    return false;
+                }
                 let untracked_root =
                     f.unstaged == Some(crate::ChangeKind::Untracked) && nested.iter().any(|n| f.path.0 == *n);
                 !untracked_root
@@ -234,7 +267,7 @@ mod tests {
         std::fs::write(root.join("services/api/main.rs"), "fn main() {}").unwrap();
         std::fs::write(root.join("README.md"), "x").unwrap();
 
-        let repos = Repos::discover(&root, &|_| false).unwrap();
+        let repos = Repos::discover(&root, &|_| false, &[]).unwrap();
         let roots: Vec<&Path> = repos.all().iter().map(|r| r.root()).collect();
         assert_eq!(roots, [root.as_path(), &root.join("services/api"), &root.join("web")]);
         assert_eq!(repos.primary().unwrap().root(), root);
@@ -260,7 +293,7 @@ mod tests {
         assert_eq!(groups.len(), 3);
         assert_eq!(groups[1].1, [root.join("services/api/main.rs")]);
 
-        let skipped = Repos::discover(&root, &|p| p.ends_with("services")).unwrap();
+        let skipped = Repos::discover(&root, &|p| p.ends_with("services"), &[]).unwrap();
         assert_eq!(skipped.all().len(), 2);
     }
 
@@ -270,9 +303,41 @@ mod tests {
         let root = dunce::canonicalize(tmp.path()).unwrap();
         git_init(&root.join("a"));
         git_init(&root.join("b"));
-        let repos = Repos::discover(&root, &|_| false).unwrap();
+        let repos = Repos::discover(&root, &|_| false, &[]).unwrap();
         assert_eq!(repos.all().len(), 2);
         assert_eq!(repos.primary().unwrap().root(), root.join("a"), "the first when none contains the project root");
         assert!(repos.for_path(&root.join("c.txt")).is_none());
+    }
+
+    #[test]
+    fn an_unregistered_folder_is_no_repository_and_reports_no_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap();
+        git_init(&root);
+        git_init(&root.join("services/legacy"));
+        std::fs::write(root.join("services/legacy/main.rs"), "fn main() {}").unwrap();
+        std::fs::write(root.join("README.md"), "x").unwrap();
+
+        let hidden = [root.join("services/legacy")];
+        let repos = Repos::discover(&root, &|_| false, &hidden).unwrap();
+        let roots: Vec<&Path> = repos.all().iter().map(|r| r.root()).collect();
+        assert_eq!(roots, [root.as_path()], "the unregistered repository is not a root");
+        // Files in it belong to no repository, so nothing of them reaches the Changes view
+        // (the enclosing repository reports the folder as one untracked entry).
+        assert!(repos.for_path(&root.join("services/legacy/main.rs")).is_none());
+        assert!(repos.at_root(&root.join("services/legacy")).is_none());
+        let paths: Vec<String> = repos
+            .status()
+            .unwrap()
+            .iter()
+            .map(|f| f.path.0.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert!(!paths.iter().any(|p| p.starts_with("services/legacy")), "{paths:?}");
+
+        // Unregistering the project root keeps a repository registered below it.
+        let root_repo = [root.clone()];
+        let repos = Repos::discover(&root, &|_| false, &root_repo).unwrap();
+        assert!(repos.all().iter().all(|r| r.root() != root));
+        assert!(repos.for_path(&root.join("services/legacy/main.rs")).is_some());
     }
 }

@@ -20,6 +20,10 @@ pub struct VcsSettings {
     pub shelf: ShelfSettings,
     /// Issue Navigation: commit-message patterns turned into links.
     pub issue_navigation: Vec<IssueLink>,
+    /// Directory Mappings: folders whose own repository is not a VCS root of the project
+    /// (`/`-separated, relative to the project root or absolute). Their files are not
+    /// version-controlled here: the enclosing repository's changes to them are hidden too.
+    pub unregistered_roots: Vec<String>,
 }
 
 impl Default for VcsSettings {
@@ -34,6 +38,7 @@ impl Default for VcsSettings {
             confirmation: VcsConfirmationSettings::default(),
             shelf: ShelfSettings::default(),
             issue_navigation: Vec::new(),
+            unregistered_roots: Vec::new(),
         }
     }
 }

@@ -237,20 +237,20 @@ Retention is set in the **Local History** section of **Settings › Appearance &
 
 **Settings › Version Control** has these pages:
 
-| Page                   | Main options                                                                                                                                                                                               |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Commit**             | Non-modal commit interface, clearing the message after commit, message inspections (blank line after subject, subject and body length, right margin), default commit checks.                               |
-| **Confirmation**       | What to do when files are created or deleted, **Show options before Update**, confirm before dropping commits, highlight modified folders in the Project view, history row limit.                          |
-| **Directory Mappings** | The detected repositories (read-only).                                                                                                                                                                     |
-| **Issue Navigation**   | Regex patterns that turn issue IDs in commit messages into links (presets for JIRA, YouTrack and GitHub).                                                                                                  |
-| **Log**                | Reference and time display, visible columns.                                                                                                                                                               |
-| **Shelf**              | Remove applied files from the shelf.                                                                                                                                                                       |
-| **Git**                | Git executable, inline blame, commit warnings, sign-off default, push options and protected branches, update method (merge or rebase), incoming-commit checks, saved passwords, combining stash and shelf. |
-| **GitHub**             | See [GitHub](/en/guide/github).                                                                                                                                                                            |
+| Page                   | Main options                                                                                                                                                                                                |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Commit**             | Non-modal commit interface, clearing the message after commit, message inspections (blank line after subject, subject and body length, right margin), default commit checks.                                |
+| **Confirmation**       | What to do when files are created or deleted, **Show options before Update**, confirm before dropping commits, highlight modified folders in the Project view, history row limit.                           |
+| **Directory Mappings** | The project's repositories: its own, and those nested in it (submodules, separate clones, worktrees). Switching a folder's VCS to `<none>` stops the IDE from version-controlling it and hides its changes. |
+| **Issue Navigation**   | Regex patterns that turn issue IDs in commit messages into links (presets for JIRA, YouTrack and GitHub).                                                                                                   |
+| **Log**                | Reference and time display, visible columns.                                                                                                                                                                |
+| **Shelf**              | Remove applied files from the shelf.                                                                                                                                                                        |
+| **Git**                | Git executable, inline blame, commit warnings, sign-off default, push options and protected branches, update method (merge or rebase), incoming-commit checks, saved passwords, combining stash and shelf.  |
+| **GitHub**             | See [GitHub](/en/guide/github).                                                                                                                                                                             |
 
 ## Not supported
 
 - Mercurial, Subversion, Perforce and other systems.
-- Submodule commands and editable directory mappings.
+- Submodule commands.
 - Per-line partial commits (block level only).
 - Git LFS beyond the large-file warning.

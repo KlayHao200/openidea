@@ -5,13 +5,14 @@
  * `platform/workflowSettings`.
  */
 import { useEffect, useId, useState } from "react";
-import { call, commands, isTauri } from "@/platform/ipc";
+import { call, commands, isTauri, onIdeEvent } from "@/platform/ipc";
 import { useProject } from "@/platform/project";
 import { WORKFLOW_LIMITS, type IssueLinkValid } from "@/platform/workflowSettings";
 import { showInFileManagerLabel } from "@/platform/fileManager";
-import { Button, Icon, Input, type SelectOption, T } from "@/ui";
+import { Button, Icon, Input, Select, type SelectOption, T } from "@/ui";
 import { Row, SettingSelect } from "../components/Form";
 import { useSetting } from "../components/context";
+import { useSettingsDialog } from "../model/staging";
 import type { PageSpec } from "./spec";
 import { BoundToggle, Grid, Indented, RadioRow, TableEditor, ToggleNumber } from "./workflowControls";
 import styles from "./Workflow.module.css";
@@ -36,6 +37,47 @@ function HistoryLimitRow() {
 
 function MappingsTable() {
   const project = useProject((s) => s.project);
+  // Settings for New Projects has no folder to map.
+  const newProjects = useSettingsDialog((s) => s.newProjects);
+  const [stored, setUnregistered] = useSetting<string[]>("vcs.unregisteredRoots");
+  const unregistered = stored ?? [];
+  // The roots the backend found, and the project they belong to: a switch of project never
+  // shows the previous one's rows. Re-read after each rescan (a folder switched back to Git
+  // is a root again) and after each Apply.
+  const [found, setFound] = useState<{ root: string; roots: string[] } | null>(null);
+  const settings = useProject((s) => s.settings);
+  const [rescans, setRescans] = useState(0);
+  useEffect(() => {
+    if (!isTauri()) return;
+    return onIdeEvent("vcsChanged", () => setRescans((n) => n + 1));
+  }, []);
+  useEffect(() => {
+    if (!project || newProjects || !isTauri()) return;
+    const root = project.root;
+    let cancelled = false;
+    void call(commands.vcsRoots())
+      .then((list) => {
+        if (!cancelled) setFound({ root, roots: list.map((r) => r.root) });
+      })
+      .catch(() => {
+        if (!cancelled) setFound({ root, roots: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project, newProjects, settings, rescans]);
+  const roots = found && found.root === project?.root ? found.roots : [];
+  const resolved = unregistered.map((p) => resolveMapping(project?.root, p));
+  // A folder the user unregistered has no repository to list; it keeps its row so it can be
+  // registered again. The project folder is not a mapping: its repository is always a root.
+  const rows = [...new Set([...roots, ...resolved])]
+    .filter((p) => p !== project?.root)
+    .sort((a, b) => a.localeCompare(b));
+  const isRegistered = (path: string) => !resolved.includes(path);
+  const setRegistered = (path: string, registered: boolean) => {
+    const rel = mappingOf(project?.root, path);
+    setUnregistered(registered ? unregistered.filter((p) => p !== rel) : [...new Set([...unregistered, rel])]);
+  };
   return (
     <div className={styles.tableBox}>
       <table className={styles.table} aria-label={tx("Directory mappings")}>
@@ -57,18 +99,67 @@ function MappingsTable() {
               </td>
             </tr>
           ) : (
-            <tr>
-              <td title={project.root}>
-                <Icon name="folder" size={16} className={styles.mappingIcon} />
-                {tx("<Project>")} {project.root}
-              </td>
-              <td>{project.isGit ? "Git" : tx("<none>")}</td>
-            </tr>
+            <>
+              <tr>
+                <td title={project.root}>
+                  <Icon name="folder" size={16} className={styles.mappingIcon} />
+                  {tx("<Project>")} {project.root}
+                </td>
+                <td>{project.isGit ? "Git" : <T>{"<none>"}</T>}</td>
+              </tr>
+              {rows.map((path) => {
+                const label = relativeTo(project.root, path);
+                return (
+                  <tr key={path}>
+                    <td title={path} className={styles.mappingIndent}>
+                      <Icon name="folder" size={16} className={styles.mappingIcon} />
+                      {label}
+                    </td>
+                    <td>
+                      <Select<"git" | "none">
+                        value={isRegistered(path) ? "git" : "none"}
+                        options={[
+                          { value: "git", label: "Git" },
+                          { value: "none", label: "<none>" },
+                        ]}
+                        onChange={(v) => setRegistered(path, v === "git")}
+                        aria-label={tx`VCS of ${label}`}
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </>
           )}
         </tbody>
       </table>
+      {project && (
+        <p className={styles.inlineHint}>
+          <T>
+            Repositories nested in the project: submodules, separate clones and worktrees. Choosing &lt;none&gt; stops
+            the IDE from version-controlling that folder, and its changes are not shown.
+          </T>
+        </p>
+      )}
     </div>
   );
+}
+
+/** A stored mapping (`/`-separated, relative to the project root or absolute) as a path. */
+function resolveMapping(root: string | undefined, path: string): string {
+  const p = path.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!root || p.startsWith("/") || /^[A-Za-z]:\//.test(p)) return p;
+  return `${root}/${p}`;
+}
+
+/** `path` as stored: relative to the project root when it lies below it, else absolute. */
+function mappingOf(root: string | undefined, path: string): string {
+  return root && path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
+}
+
+/** `path` shown in the table: relative to the project root when it lies below it. */
+function relativeTo(root: string, path: string): string {
+  return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
 }
 
 // ---------------------------------------------------------------------------
@@ -489,9 +580,20 @@ export const VCS_PAGES: PageSpec[] = [
     id: "vcs.mappings",
     title: "Directory Mappings",
     order: 3,
-    keywords: ["root", "repository", "vcs root"],
+    projectScope: true,
+    defaultScope: "project",
+    keywords: ["root", "repository", "vcs root", "unregister", "nested repository"],
     sections: [
-      { options: [{ kind: "custom", label: "Directory", keywords: ["VCS", "Git"], component: MappingsTable }] },
+      {
+        options: [
+          {
+            kind: "custom",
+            label: "Directory",
+            keywords: ["VCS", "Git", "none", "unregistered"],
+            component: MappingsTable,
+          },
+        ],
+      },
     ],
   },
   {

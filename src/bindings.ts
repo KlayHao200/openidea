@@ -11526,6 +11526,12 @@ export type VcsSettings = {
 	shelf?: ShelfSettings,
 	/**  Issue Navigation: commit-message patterns turned into links. */
 	issueNavigation?: IssueLink[],
+	/**
+	 *  Directory Mappings: folders whose own repository is not a VCS root of the project
+	 *  (`/`-separated, relative to the project root or absolute). Their files are not
+	 *  version-controlled here: the enclosing repository's changes to them are hidden too.
+	 */
+	unregisteredRoots?: string[],
 };
 
 /**  The tool that creates a new Python environment in "Add Python Interpreter". */

@@ -76,6 +76,8 @@ export interface VcsSettingsValid {
   };
   shelf: { removeApplied: boolean };
   issueNavigation: IssueLinkValid[];
+  /** Directory Mappings: folders whose repository is not a VCS root of the project. */
+  unregisteredRoots: string[];
 }
 
 /** Mirrors `ide-core::workflow_settings::LogLevelColors` defaults. */
@@ -284,6 +286,7 @@ export const DEFAULT_WORKFLOW: WorkflowSettings = {
     },
     shelf: { removeApplied: false },
     issueNavigation: [],
+    unregisteredRoots: [],
   },
   console: {
     softWrap: false,
@@ -448,6 +451,7 @@ export function validateVcs(raw: unknown): VcsSettingsValid {
           .map((x) => ({ pattern: text(x.pattern, ""), link: text(x.link, "") }))
           .filter((x) => x.pattern.trim())
       : [],
+    unregisteredRoots: strings(v.unregisteredRoots, d.unregisteredRoots).map((p) => p.trim().replace(/\\/g, "/")),
   };
 }
 

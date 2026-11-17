@@ -231,6 +231,10 @@
   vertical-align: -3px;
   margin-right: 6px;
 }
+/* Nested repositories sit below the project's own row. */
+.table td.mappingIndent {
+  padding-left: 22px;
+}
 /* The aligned rows of a section share one label column, as wide as its widest label. */
 .toolsLayout *:has(> .alignedRow) {
   display: grid;

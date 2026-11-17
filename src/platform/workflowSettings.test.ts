@@ -27,6 +27,14 @@ describe("validateWorkflow", () => {
     expect(commit("yes")).toBeNull();
   });
 
+  it("keeps the unregistered folders as written, trimming and normalising separators", () => {
+    const roots = (unregisteredRoots: unknown) =>
+      validateWorkflow({ vcs: { unregisteredRoots } }).vcs.unregisteredRoots;
+    expect(DEFAULT_WORKFLOW.vcs.unregisteredRoots).toEqual([]);
+    expect(roots(["services\\legacy", " services/api ", "", 3])).toEqual(["services/legacy", "services/api"]);
+    expect(roots("services/legacy")).toEqual([]);
+  });
+
   it("falls back to defaults for missing or malformed values", () => {
     expect(validateWorkflow(undefined)).toEqual(DEFAULT_WORKFLOW);
     const v = validateWorkflow({

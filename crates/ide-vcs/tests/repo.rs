@@ -1919,7 +1919,7 @@ fn restricted_reads_ignore_executable_repository_configuration() {
     assert!(!repo.log(&LogQuery::default()).unwrap().is_empty());
     repo.merge_versions(&f.path("a.txt"), encoding_rs::UTF_8).unwrap();
     assert!(!f.path("execution.marker").exists());
-    let repos = ide_vcs::Repos::discover(&f.dir, &|_| false).unwrap();
+    let repos = ide_vcs::Repos::discover(&f.dir, &|_| false, &[]).unwrap();
     for r in repos.all() {
         r.set_execution_allowed(false);
     }

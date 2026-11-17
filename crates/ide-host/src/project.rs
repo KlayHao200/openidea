@@ -913,7 +913,7 @@ fn light_watcher(
 }
 
 /// Looks for repositories nested below the project (and the one containing it);
-/// emits `VcsChanged` when the set of roots changed.
+/// emits `VcsChanged` when the set of roots, or of the folders left out of them, changed.
 fn scan_repositories(
     root: &Path,
     repos: &RwLock<Repos>,
@@ -924,7 +924,10 @@ fn scan_repositories(
 ) {
     match discover_repositories(root, settings, build_cache, trusted) {
         Ok(found) => {
-            if found.roots() != repos.read().roots() {
+            let current = repos.read().clone();
+            // A folder unregistered while its own repository happened to be the one that went
+            // away still changes the status the Changes view shows: compare both sets.
+            if found.roots() != current.roots() || found.hidden() != current.hidden() {
                 *repos.write() = found;
                 sink.emit(IdeEvent::VcsChanged { root: root.to_path_buf().into() });
             }
@@ -936,7 +939,8 @@ fn scan_repositories(
 /// The repository containing `root` and those nested below it or below a content root.
 /// The project-open scan and the watcher's rescan share these skip rules.
 fn discover_repositories(root: &Path, settings: &SettingsStore, build_cache: &Path, trusted: bool) -> IdeResult<Repos> {
-    let ignored = settings.effective().ignored_names();
+    let effective = settings.effective();
+    let ignored = effective.ignored_names();
     let skip = |p: &Path| {
         p.file_name().is_some_and(|n| {
             let name = n.to_string_lossy();
@@ -946,8 +950,25 @@ fn discover_repositories(root: &Path, settings: &SettingsStore, build_cache: &Pa
         })
     };
     let mut roots = vec![root.to_path_buf()];
-    roots.extend(content_roots(&settings.effective(), root, build_cache, trusted));
-    Repos::discover_roots(&roots, &skip)
+    roots.extend(content_roots(&effective, root, build_cache, trusted));
+    let hidden = unregistered_roots(root, &effective.vcs.unregistered_roots);
+    Repos::discover_roots(&roots, &skip, &hidden)
+}
+
+/// Directory Mappings: the folders whose own repository is not a VCS root. A value is a path
+/// relative to the project root (`/`-separated) or an absolute one; missing folders keep their
+/// entry, so a repository restored later stays unregistered.
+fn unregistered_roots(root: &Path, values: &[String]) -> Vec<PathBuf> {
+    values
+        .iter()
+        .map(|v| v.trim().replace('\\', "/"))
+        .filter(|v| !v.is_empty())
+        .map(|v| {
+            let p = Path::new(&v);
+            if p.is_absolute() { p.to_path_buf() } else { root.join(p) }
+        })
+        .map(|p| dunce::canonicalize(&p).unwrap_or(p))
+        .collect()
 }
 
 impl Project {

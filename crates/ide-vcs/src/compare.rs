@@ -321,7 +321,7 @@ mod tests {
         write(&root, "src/文件 name.txt", "old\nnew\n");
         write(&root, "src/untracked space 中文.txt", "new\nfile\n");
         write(&root, "other/stable.txt", "changed\n");
-        let repos = Repos::discover(&root, &|_| false).unwrap();
+        let repos = Repos::discover(&root, &|_| false, &[]).unwrap();
         let cancel = CancellationToken::new();
         let result = repos.compare_paths(&[root.join("src")], "main", None, &cancel).unwrap();
         assert_eq!(result.repositories.len(), 1);
@@ -360,7 +360,7 @@ mod tests {
         write(&root, "loose/readme.txt", "not git\n");
         write(&root.join("client"), "src/new.txt", "client\n");
         write(&root.join("server"), "src/文件 name.txt", "server\n");
-        let repos = Repos::discover(&root, &|_| false).unwrap();
+        let repos = Repos::discover(&root, &|_| false, &[]).unwrap();
         let scope = repos.compare_scope(std::slice::from_ref(&root));
         assert_eq!(scope.repositories.len(), 3);
         assert_eq!(scope.skipped_paths, [IpcPath(root.join("loose"))]);
@@ -396,7 +396,7 @@ mod tests {
         init(&root.join("nested"), "main");
         write(&root.join("nested"), "src/new.txt", "nested\n");
         std::fs::write(root.join("src/image.bin"), [0, 1, 2]).unwrap();
-        let repos = Repos::discover(&root, &|_| false).unwrap();
+        let repos = Repos::discover(&root, &|_| false, &[]).unwrap();
         let result = repos.compare_paths(std::slice::from_ref(&root), "main", None, &CancellationToken::new()).unwrap();
         assert_eq!(result.repositories.len(), 2);
         assert_eq!(result.repositories[0].files.len(), 1);
@@ -414,7 +414,7 @@ mod tests {
         init(&root.join("client"), "main");
         write(&root, ".openidea/state.json", "{}");
         write(&root, ".git/config", "ignored metadata");
-        let repos = Repos::discover(&root, &|_| false).unwrap();
+        let repos = Repos::discover(&root, &|_| false, &[]).unwrap();
         assert!(repos.compare_scope(std::slice::from_ref(&root)).skipped_paths.is_empty());
         write(&root, "services/notes.txt", "loose nested content");
         write(&root, "loose/readme.txt", "loose");
@@ -432,7 +432,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let root = normalized(temp.path());
         init(&root, "main");
-        let repos = Repos::discover(&root, &|_| false).unwrap();
+        let repos = Repos::discover(&root, &|_| false, &[]).unwrap();
         let cancel = CancellationToken::new();
         let result = repos.compare_paths(std::slice::from_ref(&root), "missing-revision", None, &cancel).unwrap();
         assert!(result.repositories[0].missing_revision);
@@ -456,7 +456,7 @@ mod tests {
         symlink(root.join("src"), root.join("unreadable")).unwrap();
         symlink(root.join("vanished"), root.join("missing")).unwrap();
         write(&root, "new.txt", "still counted\n");
-        let repos = Repos::discover(&root, &|_| false).unwrap();
+        let repos = Repos::discover(&root, &|_| false, &[]).unwrap();
         let result = repos.compare_paths(&[root], "main", None, &CancellationToken::new()).unwrap();
         let repo = &result.repositories[0];
         assert!(repo.error.is_none(), "{repo:?}");
@@ -493,7 +493,7 @@ mod tests {
         write(&root, ".gitattributes", "*.txt filter=marker diff=marker\n");
         write(&root, "src/文件 name.txt", "changed\n");
         write(&root, "new.txt", "untracked\n");
-        let repos = Repos::discover(&root, &|_| false).unwrap();
+        let repos = Repos::discover(&root, &|_| false, &[]).unwrap();
         for repo in repos.all() {
             repo.set_execution_allowed(false);
         }
@@ -522,7 +522,7 @@ mod tests {
             std::fs::write(&config, [std::fs::read(&config).unwrap(), section].concat()).unwrap();
             // The size it has in the index, so git has to read the file to tell whether it changed.
             write(&root, "src/move.txt", "more\n");
-            let repos = Repos::discover(&root, &|_| false).unwrap();
+            let repos = Repos::discover(&root, &|_| false, &[]).unwrap();
             for repo in repos.all() {
                 repo.set_execution_allowed(false);
             }
@@ -559,7 +559,7 @@ mod tests {
         let (root, sub, marker) = with_submodule(temp.path(), "*.txt filter=marker\n");
         let command = format!("echo x > '{}'; cat", marker.to_str().unwrap().replace('\\', "/"));
         git(&sub, &["config", "filter.marker.clean", &command]);
-        let repos = Repos::discover(&root, &|_| false).unwrap();
+        let repos = Repos::discover(&root, &|_| false, &[]).unwrap();
         for repo in repos.all() {
             repo.set_execution_allowed(false);
         }
@@ -605,7 +605,7 @@ mod tests {
             let file = std::fs::File::options().write(true).open(root.join("src/move.txt")).unwrap();
             file.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(seconds)).unwrap();
         };
-        let repos = Repos::discover(&root, &|_| false).unwrap();
+        let repos = Repos::discover(&root, &|_| false, &[]).unwrap();
         let repo = repos.at_root(&root).unwrap();
         repo.set_execution_allowed(false);
         let mut ran = Vec::new();
@@ -639,7 +639,7 @@ mod tests {
         let command = format!("echo x > '{}'; cat", marker.to_str().unwrap().replace('\\', "/"));
         git(&sub, &["config", "diff.marker.command", &command]);
         git(&root, &["config", "diff.submodule", "diff"]);
-        let repos = Repos::discover(&root, &|_| false).unwrap();
+        let repos = Repos::discover(&root, &|_| false, &[]).unwrap();
         for repo in repos.all() {
             repo.set_execution_allowed(false);
         }
@@ -719,7 +719,7 @@ mod tests {
         git(&root, &["config", "log.showSignature", "true"]);
         git(&root, &["config", "gpg.program", &script]);
 
-        let repos = Repos::discover(&root, &|_| false).unwrap();
+        let repos = Repos::discover(&root, &|_| false, &[]).unwrap();
         let repo = repos.all().first().unwrap();
         repo.set_execution_allowed(false);
         let file = root.join("src/move.txt");
